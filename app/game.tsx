@@ -156,65 +156,80 @@ export default function Game() {
         </Text>
       </View>
 
-      <TouchableOpacity
-        activeOpacity={revealed ? 1 : 0.8}
-        onPress={() => !revealed && revealCard()}
-        disabled={revealed}
-      >
-        <Animated.View
-          {...(isWeb ? {} : panResponder.panHandlers)}
-          style={[
-            styles.card,
-            {
-              transform: [{ translateY: pan.y }],
-            },
-          ]}
-        >
+      <View style={styles.cardContainer}>
+        {/* Tarjeta de fondo - siempre visible con la palabra */}
+        <View style={[styles.card, styles.cardBackground]}>
           <Text
             style={[
               styles.cardTitle,
               { fontSize: dynamicStyles.cardTitleFontSize },
             ]}
           >
-            {revealed ? "TU ROL" : isWeb ? "TOCA PARA REVELAR" : "DESLIZA HACIA ARRIBA"}
+            TU PALABRA
           </Text>
-
-          {!revealed ? (
-            <View style={styles.cardContent}>
-              <Text style={styles.swipeHint}>{isWeb ? "👇" : "↑"}</Text>
-            </View>
-          ) : (
-            <View style={styles.cardContent}>
-              {isImpostor ? (
-                <>
-                  <Text
-                    style={[
-                      styles.impostorText,
-                      { fontSize: dynamicStyles.impostorFontSize },
-                    ]}
-                  >
-                    IMPOSTOR
-                  </Text>
-                  {room.config.enableClue && (
-                    <Text style={styles.clueText}>
-                      Pista: {room.gameState.currentClue}
-                    </Text>
-                  )}
-                </>
-              ) : (
+          <View style={styles.cardContent}>
+            {isImpostor ? (
+              <>
                 <Text
                   style={[
-                    styles.wordText,
-                    { fontSize: dynamicStyles.wordFontSize },
+                    styles.impostorText,
+                    { fontSize: dynamicStyles.impostorFontSize },
                   ]}
                 >
-                  {room.gameState.currentWord}
+                  IMPOSTOR
                 </Text>
-              )}
-            </View>
-          )}
-        </Animated.View>
-      </TouchableOpacity>
+                {room.config.enableClue && (
+                  <Text style={styles.clueText}>
+                    Pista: {room.gameState.currentClue}
+                  </Text>
+                )}
+              </>
+            ) : (
+              <Text
+                style={[
+                  styles.wordText,
+                  { fontSize: dynamicStyles.wordFontSize },
+                ]}
+              >
+                {room.gameState.currentWord}
+              </Text>
+            )}
+          </View>
+        </View>
+
+        {/* Tarjeta frontal - se desliza hacia arriba */}
+        {!revealed && (
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => !revealed && revealCard()}
+            disabled={revealed}
+            style={styles.cardTouchable}
+          >
+            <Animated.View
+              {...(isWeb ? {} : panResponder.panHandlers)}
+              style={[
+                styles.card,
+                styles.cardFront,
+                {
+                  transform: [{ translateY: pan.y }],
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.cardTitle,
+                  { fontSize: dynamicStyles.cardTitleFontSize },
+                ]}
+              >
+                {isWeb ? "TOCA PARA REVELAR" : "DESLIZA HACIA ARRIBA"}
+              </Text>
+              <View style={styles.cardContent}>
+                <Text style={styles.swipeHint}>{isWeb ? "👇" : "↑"}</Text>
+              </View>
+            </Animated.View>
+          </TouchableOpacity>
+        )}
+      </View>
 
       {revealed && (
         <View style={styles.statusContainer}>
@@ -275,6 +290,17 @@ const styles = StyleSheet.create({
     textAlign: "center",
     letterSpacing: 2,
   },
+  cardContainer: {
+    width: "100%",
+    height: 350,
+    position: "relative",
+  },
+  cardTouchable: {
+    position: "absolute",
+    width: "100%",
+    height: "100%",
+    zIndex: 2,
+  },
   card: {
     width: "100%",
     height: 350,
@@ -290,6 +316,16 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 12,
     elevation: 10,
+  },
+  cardBackground: {
+    position: "absolute",
+    width: "100%",
+    height: "100%",
+    zIndex: 1,
+  },
+  cardFront: {
+    backgroundColor: "#16213e",
+    zIndex: 2,
   },
   cardTitle: {
     color: "#ff006e",

@@ -184,7 +184,7 @@ export default function Results() {
         <View style={styles.winnerContainer}>
           <Text style={styles.winnerTitle}>
             {wasImpostor
-              ? "¡GANAN LOS CIUDADANOS! 🎉"
+              ? "¡GANAN LOS JUGADORES! 🎉"
               : "¡GANA EL IMPOSTOR! 😈"}
           </Text>
         </View>

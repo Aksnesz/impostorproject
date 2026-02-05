@@ -76,11 +76,7 @@ export default function Voting() {
       vote: votedPlayerId,
     });
 
-    // 2. Solo el host procesa la votación
-    const isHost = room.hostId === playerId;
-    if (!isHost) return;
-
-    // 3. Obtener datos actualizados de Firebase para verificar si todos votaron
+    // 2. Obtener datos actualizados de Firebase para verificar si todos votaron
     const roomRef = ref(database, `rooms/${roomCode}`);
     const snapshot = await get(roomRef);
     
@@ -89,7 +85,7 @@ export default function Voting() {
     const updatedRoom = snapshot.val() as Room;
     const playersArray = Object.values(updatedRoom.players);
 
-    // 4. Verificar si TODOS votaron
+    // 3. Verificar si TODOS votaron
     const allVoted = playersArray.every(
       (p) => p.vote && p.vote !== "",
     );
@@ -99,6 +95,9 @@ export default function Voting() {
       return;
     }
 
+    // 4. Si todos votaron, CUALQUIER jugador puede procesar (no solo el host)
+    console.log("Todos votaron! Procesando resultados...");
+    
     // 5. Contar votos
     const voteCounts: { [key: string]: number } = {};
     playersArray.forEach((player) => {
@@ -123,7 +122,7 @@ export default function Voting() {
       mostVoted,
     );
 
-    // 7. Cambiar a resultados
+    // 7. Cambiar a resultados (todos intentan, pero Firebase solo acepta uno)
     await update(ref(database, `rooms/${roomCode}/gameState`), {
       phase: "results",
       votingResults: voteCounts,

@@ -1,79 +1,147 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { get, onValue, ref, update } from "firebase/database"; // ← AGREGADO get
 import { useEffect, useRef, useState } from "react";
 import {
-    Alert,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    useWindowDimensions,
-    View,
+  Alert,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
 } from "react-native";
-
-interface GamePlayState {
-  players: string[];
-  impostors: number[];
-  categories: string[];
-  currentWord: string;
-}
+import { database } from "../config/firebase";
+import { Room } from "../types/game";
 
 export default function GamePlay() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const params = useLocalSearchParams();
+  const roomCode = params.roomCode as string;
+  const playerId = params.playerId as string;
+
+  const [room, setRoom] = useState<Room | null>(null);
+  const [timeLeft, setTimeLeft] = useState(420);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const isSmallScreen = width < 380;
+  const isMediumScreen = width < 480;
+
+  const dynamicStyles = {
+    messageFontSize: isSmallScreen ? 24 : isMediumScreen ? 28 : 32,
+    timerFontSize: isSmallScreen ? 56 : isMediumScreen ? 72 : 88,
+  };
+
+  useEffect(() => {
+    const roomRef = ref(database, `rooms/${roomCode}`);
+    const unsubscribe = onValue(roomRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.val() as Room;
+        setRoom(data);
+        setTimeLeft(data.gameState.timeLeft);
+
+        if (data.gameState.phase === "voting") {
+          router.replace({
+            pathname: "/voting",
+            params: { roomCode, playerId },
+          });
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [roomCode, playerId]);
+
+  // NUEVA: Función para iniciar votación limpiando votos
+  const startVotingPhase = async () => {
+    // 1. Resetear votos de TODOS los jugadores
+    const playersRef = ref(database, `rooms/${roomCode}/players`);
+    const snapshot = await get(playersRef);
+
+    if (snapshot.exists()) {
+      const updates: any = {};
+      snapshot.forEach((child) => {
+        updates[`${child.key}/vote`] = "";
+      });
+      await update(playersRef, updates);
+    }
+
+    // 2. Cambiar fase a voting
+    await update(ref(database, `rooms/${roomCode}/gameState`), {
+      phase: "voting",
+      timeLeft: 0,
+    });
+  };
+
+  // Timer solo host
+  useEffect(() => {
+    if (!room) return;
+
+    const isHost = room.hostId === playerId;
+
+    if (isHost && room.gameState.phase === "playing") {
+      timerRef.current = setInterval(async () => {
+        const newTime = timeLeft - 1;
+
+        if (newTime <= 0) {
+          clearInterval(timerRef.current!);
+          await startVotingPhase(); // ← USANDO LA NUEVA FUNCIÓN
+        } else {
+          await update(ref(database, `rooms/${roomCode}/gameState`), {
+            timeLeft: newTime,
+          });
+        }
+      }, 1000);
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [timeLeft, room, playerId, roomCode]);
 
   const handleBackPress = () => {
-    Alert.alert("¿Quieres terminar el juego?", "", [
+    Alert.alert("¿Terminar el juego?", "Esto cerrará la partida para todos", [
       {
         text: "Cancelar",
-        onPress: () => {},
         style: "cancel",
       },
       {
-        text: "Continuar",
-        onPress: () => {
-          router.push("/game-setup");
-        },
+        text: "Terminar",
         style: "destructive",
+        onPress: async () => {
+          await update(ref(database, `rooms/${roomCode}/gameState`), {
+            phase: "lobby",
+          });
+          router.replace({
+            pathname: "/room",
+            params: { roomCode, playerId },
+          });
+        },
       },
     ]);
   };
 
-  // Reconstruct game state from params
-  const gameState: GamePlayState = {
-    players: params.playersJson ? JSON.parse(params.playersJson as string) : [],
-    impostors: params.impostorsJson
-      ? JSON.parse(params.impostorsJson as string)
-      : [],
-    categories: params.categoriesJson
-      ? JSON.parse(params.categoriesJson as string)
-      : [],
-    currentWord: params.currentWord as string,
+  // Botón skip (solo host)
+  const handleSkipTimer = async () => {
+    Alert.alert(
+      "Saltar discusión",
+      "¿Quieres pasar directamente a la votación?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Sí, saltar",
+          style: "destructive",
+          onPress: async () => {
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+            }
+            await startVotingPhase(); // ← USANDO LA NUEVA FUNCIÓN
+          },
+        },
+      ],
+    );
   };
-
-  const [timeLeft, setTimeLeft] = useState(420); // 7 minutes
-  const [currentSpeakerIndex, setCurrentSpeakerIndex] = useState(0);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Select random speaker at component mount
-  useEffect(() => {
-    const randomIndex = Math.floor(Math.random() * gameState.players.length);
-    setCurrentSpeakerIndex(randomIndex);
-  }, []);
-
-  // Timer countdown
-  useEffect(() => {
-    timerRef.current = setTimeout(() => {
-      if (timeLeft > 0) {
-        setTimeLeft(timeLeft - 1);
-      }
-    }, 1000);
-
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
-    };
-  }, [timeLeft]);
 
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -81,24 +149,26 @@ export default function GamePlay() {
     return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
   };
 
-  const currentSpeaker = gameState.players[currentSpeakerIndex];
-  const isSmallScreen = width < 380;
-  const isMediumScreen = width < 480;
+  if (!room) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.loadingText}>Cargando...</Text>
+      </View>
+    );
+  }
 
-  const dynamicStyles = {
-    messageFontSize: isSmallScreen ? 24 : isMediumScreen ? 28 : 32,
-    timerFontSize: isSmallScreen ? 56 : isMediumScreen ? 72 : 88,
-    playerFontSize: isSmallScreen ? 28 : isMediumScreen ? 36 : 44,
-  };
+  const isHost = room.hostId === playerId;
+  const isPlaying = room.gameState.phase === "playing";
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
-        <Text style={styles.backButtonText}>← ATRÁS</Text>
-      </TouchableOpacity>
+      {isHost && (
+        <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
+          <Text style={styles.backButtonText}>← TERMINAR</Text>
+        </TouchableOpacity>
+      )}
 
       <View style={styles.centerContent}>
-        {/* Message and Player Name */}
         <View style={styles.headerContainer}>
           <Text
             style={[
@@ -106,26 +176,35 @@ export default function GamePlay() {
               { fontSize: dynamicStyles.messageFontSize },
             ]}
           >
-            COMIENZA
+            ¡DISCUTAN!
           </Text>
-
-          <Text
-            style={[
-              styles.playerName,
-              { fontSize: dynamicStyles.playerFontSize },
-            ]}
-          >
-            {currentSpeaker}
-          </Text>
+          <Text style={styles.instruction}>Encuentren al impostor</Text>
         </View>
 
-        {/* Timer */}
         <View style={styles.timerContainer}>
           <Text
             style={[styles.timer, { fontSize: dynamicStyles.timerFontSize }]}
           >
             {formatTime(timeLeft)}
           </Text>
+
+          {isHost && isPlaying && (
+            <TouchableOpacity
+              style={styles.skipButton}
+              onPress={handleSkipTimer}
+            >
+              <Text style={styles.skipButtonText}>SALTAR A VOTACIÓN</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <View style={styles.playersContainer}>
+          <Text style={styles.playersTitle}>Jugadores en partida:</Text>
+          {Object.values(room.players).map((player) => (
+            <Text key={player.id} style={styles.playerText}>
+              {player.name} {player.isHost && "👑"}
+            </Text>
+          ))}
         </View>
       </View>
     </View>
@@ -133,11 +212,29 @@ export default function GamePlay() {
 }
 
 const styles = StyleSheet.create({
+  skipButton: {
+    marginTop: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: "#ff006e",
+    borderRadius: 12,
+  },
+  skipButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+    letterSpacing: 1,
+    fontSize: 14,
+  },
   container: {
     flex: 1,
     backgroundColor: "#1a1a2e",
     paddingHorizontal: 20,
     paddingVertical: 40,
+  },
+  loadingText: {
+    color: "#fff",
+    fontSize: 18,
+    textAlign: "center",
   },
   centerContent: {
     flex: 1,
@@ -146,7 +243,7 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     alignItems: "center",
-    marginBottom: 80,
+    marginBottom: 60,
   },
   message: {
     color: "#00ff88",
@@ -154,12 +251,11 @@ const styles = StyleSheet.create({
     letterSpacing: 3,
     textAlign: "center",
   },
-  playerName: {
-    color: "#ff006e",
-    fontWeight: "bold",
-    textAlign: "center",
-    letterSpacing: 2,
-    marginTop: 15,
+  instruction: {
+    color: "#888",
+    fontSize: 16,
+    marginTop: 10,
+    fontStyle: "italic",
   },
   timerContainer: {
     alignItems: "center",
@@ -173,11 +269,27 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 12,
     elevation: 10,
+    marginBottom: 40,
   },
   timer: {
     color: "#ff006e",
     fontWeight: "bold",
     letterSpacing: 2,
+  },
+  playersContainer: {
+    alignItems: "center",
+  },
+  playersTitle: {
+    color: "#ff006e",
+    fontSize: 14,
+    fontWeight: "bold",
+    marginBottom: 10,
+    letterSpacing: 1,
+  },
+  playerText: {
+    color: "#888",
+    fontSize: 14,
+    marginVertical: 3,
   },
   backButton: {
     position: "absolute",
@@ -189,6 +301,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: "#ff006e",
+    zIndex: 10,
   },
   backButtonText: {
     color: "#ff006e",

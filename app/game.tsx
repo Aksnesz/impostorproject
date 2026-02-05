@@ -2,8 +2,10 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { onValue, ref, update } from "firebase/database";
 import { useEffect, useRef, useState } from "react";
 import {
+  Alert,
   Animated,
   PanResponder,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -55,6 +57,16 @@ export default function Game() {
             params: { roomCode, playerId },
           });
         }
+      } else {
+        // Sala cerrada
+        if (Platform.OS === "web") {
+          alert("La sala ha sido cerrada");
+          router.replace("/");
+        } else {
+          Alert.alert("Sala cerrada", "La sala ha sido cerrada por el host", [
+            { text: "OK", onPress: () => router.replace("/") },
+          ]);
+        }
       }
     });
 
@@ -63,22 +75,42 @@ export default function Game() {
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderRelease: (evt, gestureState) => {
-        if (gestureState.dy < -80 && !revealed) {
-          revealCard();
+      onStartShouldSetPanResponder: () => !revealed,
+      onMoveShouldSetPanResponder: () => !revealed,
+      onPanResponderMove: (evt, gestureState) => {
+        // Solo permitir movimiento hacia arriba (dy negativo)
+        if (gestureState.dy < 0) {
+          pan.setValue({ x: 0, y: gestureState.dy });
         }
-        Animated.spring(pan, {
-          toValue: { x: 0, y: 0 },
-          useNativeDriver: false,
-        }).start();
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        // Si deslizó suficiente hacia arriba, revelar
+        if (gestureState.dy < -80 && !revealed) {
+          // Animar hacia arriba completamente
+          Animated.timing(pan, {
+            toValue: { x: 0, y: -400 },
+            duration: 300,
+            useNativeDriver: false,
+          }).start(() => {
+            revealCard();
+          });
+        } else {
+          // Regresar a la posición original
+          Animated.spring(pan, {
+            toValue: { x: 0, y: 0 },
+            friction: 7,
+            tension: 40,
+            useNativeDriver: false,
+          }).start();
+        }
       },
     }),
   ).current;
 
   const revealCard = async () => {
     setRevealed(true);
+    // Resetear la posición de la animación
+    pan.setValue({ x: 0, y: 0 });
 
     // Marcar como revelado en la base de datos
     await update(ref(database, `rooms/${roomCode}/players/${playerId}`), {
@@ -109,6 +141,7 @@ export default function Game() {
   const currentPlayer = room.players[playerId];
   const isImpostor = currentPlayer?.isImpostor || false;
   const isHost = room.hostId === playerId;
+  const isWeb = Platform.OS === "web";
 
   return (
     <View style={styles.container}>
@@ -123,59 +156,65 @@ export default function Game() {
         </Text>
       </View>
 
-      <Animated.View
-        {...panResponder.panHandlers}
-        style={[
-          styles.card,
-          {
-            transform: [{ translateY: pan.y }],
-          },
-        ]}
+      <TouchableOpacity
+        activeOpacity={revealed ? 1 : 0.8}
+        onPress={() => !revealed && revealCard()}
+        disabled={revealed}
       >
-        <Text
+        <Animated.View
+          {...(isWeb ? {} : panResponder.panHandlers)}
           style={[
-            styles.cardTitle,
-            { fontSize: dynamicStyles.cardTitleFontSize },
+            styles.card,
+            {
+              transform: [{ translateY: pan.y }],
+            },
           ]}
         >
-          {revealed ? "TU ROL" : "DESLIZA HACIA ARRIBA"}
-        </Text>
+          <Text
+            style={[
+              styles.cardTitle,
+              { fontSize: dynamicStyles.cardTitleFontSize },
+            ]}
+          >
+            {revealed ? "TU ROL" : isWeb ? "TOCA PARA REVELAR" : "DESLIZA HACIA ARRIBA"}
+          </Text>
 
-        {!revealed ? (
-          <View style={styles.cardContent}>
-            <Text style={styles.swipeHint}>↑</Text>
-          </View>
-        ) : (
-          <View style={styles.cardContent}>
-            {isImpostor ? (
-              <>
+          {!revealed ? (
+            <View style={styles.cardContent}>
+              <Text style={styles.swipeHint}>{isWeb ? "👇" : "↑"}</Text>
+            </View>
+          ) : (
+            <View style={styles.cardContent}>
+              {isImpostor ? (
+                <>
+                  <Text
+                    style={[
+                      styles.impostorText,
+                      { fontSize: dynamicStyles.impostorFontSize },
+                    ]}
+                  >
+                    IMPOSTOR
+                  </Text>
+                  {room.config.enableClue && (
+                    <Text style={styles.clueText}>
+                      Pista: {room.gameState.currentClue}
+                    </Text>
+                  )}
+                </>
+              ) : (
                 <Text
                   style={[
-                    styles.impostorText,
-                    { fontSize: dynamicStyles.impostorFontSize },
+                    styles.wordText,
+                    { fontSize: dynamicStyles.wordFontSize },
                   ]}
                 >
-                  IMPOSTOR
+                  {room.gameState.currentWord}
                 </Text>
-                {room.config.enableClue && (
-                  <Text style={styles.clueText}>
-                    Pista: {room.gameState.currentClue}
-                  </Text>
-                )}
-              </>
-            ) : (
-              <Text
-                style={[
-                  styles.wordText,
-                  { fontSize: dynamicStyles.wordFontSize },
-                ]}
-              >
-                {room.gameState.currentWord}
-              </Text>
-            )}
-          </View>
-        )}
-      </Animated.View>
+              )}
+            </View>
+          )}
+        </Animated.View>
+      </TouchableOpacity>
 
       {revealed && (
         <View style={styles.statusContainer}>

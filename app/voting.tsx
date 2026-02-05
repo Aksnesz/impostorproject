@@ -1,7 +1,9 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { onValue, ref, update } from "firebase/database";
+import { get, onValue, ref, update } from "firebase/database";
 import { useEffect, useState } from "react";
 import {
+  Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -38,7 +40,7 @@ export default function Voting() {
         setRoom(data);
 
         const myVote = data.players[playerId]?.vote;
-        if (myVote) {
+        if (myVote && myVote !== "") {
           setSelectedVote(myVote);
         }
 
@@ -47,6 +49,16 @@ export default function Voting() {
             pathname: "/results",
             params: { roomCode, playerId },
           });
+        }
+      } else {
+        // Sala cerrada
+        if (Platform.OS === "web") {
+          alert("La sala ha sido cerrada");
+          router.replace("/");
+        } else {
+          Alert.alert("Sala cerrada", "La sala ha sido cerrada por el host", [
+            { text: "OK", onPress: () => router.replace("/") },
+          ]);
         }
       }
     });
@@ -64,18 +76,22 @@ export default function Voting() {
       vote: votedPlayerId,
     });
 
-    // 2. Construir lista con tu voto aplicado
-    const playersArray = Object.values(room.players).map((p) =>
-      p.id === playerId ? { ...p, vote: votedPlayerId } : p,
-    );
-
-    // 3. Solo el host procesa la votación
+    // 2. Solo el host procesa la votación
     const isHost = room.hostId === playerId;
     if (!isHost) return;
 
+    // 3. Obtener datos actualizados de Firebase para verificar si todos votaron
+    const roomRef = ref(database, `rooms/${roomCode}`);
+    const snapshot = await get(roomRef);
+    
+    if (!snapshot.exists()) return;
+    
+    const updatedRoom = snapshot.val() as Room;
+    const playersArray = Object.values(updatedRoom.players);
+
     // 4. Verificar si TODOS votaron
     const allVoted = playersArray.every(
-      (p) => p.vote !== undefined && p.vote !== "",
+      (p) => p.vote && p.vote !== "",
     );
 
     if (!allVoted) {
@@ -124,8 +140,8 @@ export default function Voting() {
   }
 
   const players = Object.values(room.players);
-  const votedPlayers = players.filter((p) => p.vote).length;
-  const hasVoted = selectedVote !== null;
+  const votedPlayers = players.filter((p) => p.vote && p.vote !== "").length;
+  const hasVoted = selectedVote !== null && selectedVote !== "";
 
   return (
     <ScrollView style={styles.container}>
@@ -146,7 +162,6 @@ export default function Voting() {
 
       <View style={styles.playersContainer}>
         {players
-          .filter((p) => p.id !== playerId) // ← El host NO se ve a sí mismo
           .map((player) => (
             <TouchableOpacity
               key={player.id}

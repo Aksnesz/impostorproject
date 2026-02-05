@@ -2,6 +2,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { onValue, ref, update } from "firebase/database";
 import { useEffect, useState } from "react";
 import {
+    Alert,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -44,6 +46,16 @@ export default function Results() {
             params: { roomCode, playerId },
           });
         }
+      } else {
+        // Sala cerrada
+        if (Platform.OS === "web") {
+          alert("La sala ha sido cerrada");
+          router.replace("/");
+        } else {
+          Alert.alert("Sala cerrada", "La sala ha sido cerrada por el host", [
+            { text: "OK", onPress: () => router.replace("/") },
+          ]);
+        }
       }
     });
 
@@ -62,7 +74,7 @@ export default function Results() {
       await update(ref(database, `rooms/${roomCode}/players/${pId}`), {
         hasRevealed: false,
         isImpostor: false,
-        vote: null,
+        vote: "",
       });
     }
 

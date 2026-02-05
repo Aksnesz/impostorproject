@@ -4,7 +4,7 @@ export interface Player {
   isHost: boolean;
   hasRevealed: boolean;
   isImpostor: boolean;
-  vote?: string | null;
+  vote: string;
 }
 
 export interface Room {

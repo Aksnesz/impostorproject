@@ -1,8 +1,9 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { get, onValue, ref, update } from "firebase/database"; // ← AGREGADO get
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -45,6 +46,16 @@ export default function GamePlay() {
             params: { roomCode, playerId },
           });
         }
+      } else {
+        // Sala cerrada
+        if (Platform.OS === "web") {
+          alert("La sala ha sido cerrada");
+          router.replace("/");
+        } else {
+          Alert.alert("Sala cerrada", "La sala ha sido cerrada por el host", [
+            { text: "OK", onPress: () => router.replace("/") },
+          ]);
+        }
       }
     });
 
@@ -52,7 +63,8 @@ export default function GamePlay() {
   }, [roomCode, playerId]);
 
   // NUEVA: Función para iniciar votación limpiando votos
-  const startVotingPhase = async () => {
+  const startVotingPhase = useCallback(async () => {
+    console.log("startVotingPhase ejecutado");
     // 1. Resetear votos de TODOS los jugadores
     const playersRef = ref(database, `rooms/${roomCode}/players`);
     const snapshot = await get(playersRef);
@@ -62,15 +74,19 @@ export default function GamePlay() {
       snapshot.forEach((child) => {
         updates[`${child.key}/vote`] = "";
       });
+      console.log("Actualizando votos:", updates);
       await update(playersRef, updates);
+      console.log("Votos actualizados");
     }
 
     // 2. Cambiar fase a voting
+    console.log("Cambiando fase a voting");
     await update(ref(database, `rooms/${roomCode}/gameState`), {
       phase: "voting",
       timeLeft: 0,
     });
-  };
+    console.log("Fase cambiada a voting");
+  }, [roomCode]);
 
   // Timer solo host
   useEffect(() => {
@@ -98,36 +114,74 @@ export default function GamePlay() {
         clearInterval(timerRef.current);
       }
     };
-  }, [timeLeft, room, playerId, roomCode]);
+  }, [timeLeft, room, playerId, roomCode, startVotingPhase]);
 
-  const handleBackPress = () => {
-    Alert.alert("¿Terminar el juego?", "Esto cerrará la partida para todos", [
-      {
-        text: "Cancelar",
-        style: "cancel",
-      },
-      {
-        text: "Terminar",
-        style: "destructive",
-        onPress: async () => {
-          await update(ref(database, `rooms/${roomCode}/gameState`), {
-            phase: "lobby",
-          });
-          router.replace({
-            pathname: "/room",
-            params: { roomCode, playerId },
-          });
+  const handleBackPress = useCallback(async () => {
+    console.log("handleBackPress ejecutado");
+    // En web, usar window.confirm directamente
+    if (Platform.OS === "web") {
+      console.log("Ejecutando en web");
+      const confirmEnd = window.confirm("¿Terminar el juego? Esto cerrará la partida para todos");
+      console.log("Confirmación:", confirmEnd);
+      if (!confirmEnd) return;
+      
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+      console.log("Actualizando fase a lobby");
+      await update(ref(database, `rooms/${roomCode}/gameState`), {
+        phase: "lobby",
+      });
+      console.log("Fase actualizada, redirigiendo");
+      router.replace({
+        pathname: "/room",
+        params: { roomCode, playerId },
+      });
+    } else {
+      // En móvil, usar Alert
+      Alert.alert("¿Terminar el juego?", "Esto cerrará la partida para todos", [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Terminar",
+          style: "destructive",
+          onPress: async () => {
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+            }
+            console.log("Actualizando fase a lobby (móvil)");
+            await update(ref(database, `rooms/${roomCode}/gameState`), {
+              phase: "lobby",
+            });
+            console.log("Fase actualizada, redirigiendo (móvil)");
+            router.replace({
+              pathname: "/room",
+              params: { roomCode, playerId },
+            });
+          },
         },
-      },
-    ]);
-  };
+      ]);
+    }
+  }, [roomCode, playerId, router]);
 
   // Botón skip (solo host)
-  const handleSkipTimer = async () => {
-    Alert.alert(
-      "Saltar discusión",
-      "¿Quieres pasar directamente a la votación?",
-      [
+  const handleSkipTimer = useCallback(async () => {
+    console.log("handleSkipTimer ejecutado");
+    // En web, usar window.confirm directamente
+    if (Platform.OS === "web") {
+      console.log("Ejecutando skip en web");
+      const confirmSkip = window.confirm("¿Quieres pasar directamente a la votación?");
+      console.log("Confirmación skip:", confirmSkip);
+      if (!confirmSkip) return;
+      
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+      console.log("Ejecutando startVotingPhase desde skip");
+      await startVotingPhase();
+      console.log("startVotingPhase completado");
+    } else {
+      // En móvil, usar Alert
+      Alert.alert("Saltar discusión", "¿Quieres pasar directamente a la votación?", [
         { text: "Cancelar", style: "cancel" },
         {
           text: "Sí, saltar",
@@ -136,12 +190,14 @@ export default function GamePlay() {
             if (timerRef.current) {
               clearInterval(timerRef.current);
             }
-            await startVotingPhase(); // ← USANDO LA NUEVA FUNCIÓN
+            console.log("Ejecutando startVotingPhase desde skip (móvil)");
+            await startVotingPhase();
+            console.log("startVotingPhase completado (móvil)");
           },
         },
-      ],
-    );
-  };
+      ]);
+    }
+  }, [startVotingPhase]);
 
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -159,6 +215,9 @@ export default function GamePlay() {
 
   const isHost = room.hostId === playerId;
   const isPlaying = room.gameState.phase === "playing";
+
+  console.log("GamePlay - isHost:", isHost, "hostId:", room.hostId, "playerId:", playerId);
+  console.log("GamePlay - phase:", room.gameState.phase, "isPlaying:", isPlaying);
 
   return (
     <View style={styles.container}>

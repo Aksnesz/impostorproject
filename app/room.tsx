@@ -3,6 +3,7 @@ import { onValue, ref, remove, update } from "firebase/database";
 import { useEffect, useState } from "react";
 import {
     Alert,
+    Platform,
     ScrollView,
     StyleSheet,
     Switch,
@@ -136,9 +137,15 @@ export default function RoomScreen() {
           });
         }
       } else {
-        Alert.alert("Sala cerrada", "La sala ha sido cerrada por el host", [
-          { text: "OK", onPress: () => router.replace("/") },
-        ]);
+        // Sala no existe - fue cerrada
+        if (Platform.OS === "web") {
+          alert("La sala ha sido cerrada por el host");
+          router.replace("/");
+        } else {
+          Alert.alert("Sala cerrada", "La sala ha sido cerrada por el host", [
+            { text: "OK", onPress: () => router.replace("/") },
+          ]);
+        }
       }
     });
 
@@ -157,22 +164,34 @@ export default function RoomScreen() {
 
   const handleLeaveRoom = async () => {
     if (isHost) {
-      Alert.alert(
-        "¿Cerrar sala?",
-        "Eres el host. Si sales, se cerrará la sala para todos.",
-        [
-          { text: "Cancelar", style: "cancel" },
-          {
-            text: "Cerrar",
-            style: "destructive",
-            onPress: async () => {
-              await remove(ref(database, `rooms/${roomCode}`));
-              router.replace("/");
+      // El host cierra la sala para todos
+      if (Platform.OS === "web") {
+        const confirmed = window.confirm(
+          "Eres el host. Si sales, se cerrará la sala para todos. ¿Estás seguro?"
+        );
+        if (confirmed) {
+          await remove(ref(database, `rooms/${roomCode}`));
+          router.replace("/");
+        }
+      } else {
+        Alert.alert(
+          "¿Cerrar sala?",
+          "Eres el host. Si sales, se cerrará la sala para todos.",
+          [
+            { text: "Cancelar", style: "cancel" },
+            {
+              text: "Cerrar",
+              style: "destructive",
+              onPress: async () => {
+                await remove(ref(database, `rooms/${roomCode}`));
+                router.replace("/");
+              },
             },
-          },
-        ],
-      );
+          ],
+        );
+      }
     } else {
+      // Jugador normal solo se elimina de la sala
       await remove(ref(database, `rooms/${roomCode}/players/${playerId}`));
       router.replace("/");
     }
@@ -213,7 +232,7 @@ export default function RoomScreen() {
       await update(ref(database, `rooms/${roomCode}/players/${pId}`), {
         isImpostor: impostorIds.includes(pId),
         hasRevealed: false,
-        vote: null,
+        vote: "",
       });
     }
   };

@@ -54,7 +54,7 @@ export default function Index() {
             isHost: true,
             hasRevealed: false,
             isImpostor: false,
-            vote: null,
+            vote: "",
           },
         },
         config: {
@@ -124,7 +124,7 @@ export default function Index() {
           isHost: false,
           hasRevealed: false,
           isImpostor: false,
-          vote: null,
+          vote: "",
         },
       );
 

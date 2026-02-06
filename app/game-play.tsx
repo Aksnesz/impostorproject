@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { database } from "../config/firebase";
 import { Room } from "../types/game";
+import { addTrainingExample, trainIfNeeded } from "../utils/aiHelpers";
 
 export default function GamePlay() {
   const router = useRouter();
@@ -22,7 +23,8 @@ export default function GamePlay() {
 
   const [room, setRoom] = useState<Room | null>(null);
   const [timeLeft, setTimeLeft] = useState(420);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const [hasRejected, setHasRejected] = useState(false);
+  const timerRef = useRef<NodeJS.Timeout | number | null>(null);
 
   const isSmallScreen = width < 380;
   const isMediumScreen = width < 480;
@@ -45,6 +47,12 @@ export default function GamePlay() {
             pathname: "/voting",
             params: { roomCode, playerId },
           });
+        } else if (data.gameState.phase === "lobby") {
+          // Si vuelve a lobby (por rechazo de palabra), redirigir
+          router.replace({
+            pathname: "/room",
+            params: { roomCode, playerId },
+          });
         }
       } else {
         // Sala cerrada
@@ -60,9 +68,85 @@ export default function GamePlay() {
     });
 
     return () => unsubscribe();
-  }, [roomCode, playerId]);
+  }, [roomCode, playerId, router]);
 
-  // NUEVA: Función para iniciar votación limpiando votos
+  // Resetear rechazo cuando inicia nueva palabra/juego
+  useEffect(() => {
+    if (room?.gameState.phase === "playing") {
+      setHasRejected(false);
+    }
+  }, [room?.gameState.currentWord]);
+
+  // Función para rechazar la palabra
+  const handleRejectWord = useCallback(async () => {
+    if (!room || hasRejected) return;
+
+    console.log(
+      `[ML] ${room.players[playerId]?.name} rechazó la palabra: ${room.gameState.currentWord}`,
+    );
+
+    // 1. Registrar rechazo en Firebase
+    await update(ref(database, `rooms/${roomCode}/gameState/wordRejections`), {
+      [playerId]: true,
+    });
+
+    // 2. Agregar dato de entrenamiento
+    addTrainingExample(room.gameState.currentWord, true);
+
+    // 3. Marcar localmente
+    setHasRejected(true);
+
+    // 4. Obtener datos actualizados
+    const roomRef = ref(database, `rooms/${roomCode}`);
+    const snapshot = await get(roomRef);
+
+    if (!snapshot.exists()) return;
+
+    const updatedRoom = snapshot.val() as Room;
+    const rejections = updatedRoom.gameState.wordRejections || {};
+    const totalRejections = Object.keys(rejections).length;
+    const totalPlayers = Object.keys(updatedRoom.players).length;
+    const rejectionPercentage = (totalRejections / totalPlayers) * 100;
+
+    console.log(
+      `[ML] Rechazos: ${totalRejections}/${totalPlayers} (${rejectionPercentage.toFixed(1)}%)`,
+    );
+
+    // 5. Si 75% rechaza, entrenar y volver a lobby
+    if (rejectionPercentage >= 75) {
+      console.log(`[ML] 75% rechazó. Entrenando modelo...`);
+
+      // Entrenar modelo con los datos recopilados
+      await trainIfNeeded();
+
+      console.log(
+        `[ML] Volviendo a lobby para seleccionar nuevas categorías...`,
+      );
+
+      // Resetear estado del juego y volver a lobby
+      await update(ref(database, `rooms/${roomCode}/gameState`), {
+        phase: "lobby",
+        currentWord: "",
+        currentClue: "",
+        timeLeft: 420,
+        impostorIds: [],
+        wordRejections: {},
+        rejectionCount: 0,
+        votingResults: {},
+        mostVoted: "",
+      });
+
+      // Resetear datos de jugadores
+      const playerIds = Object.keys(updatedRoom.players);
+      for (const pId of playerIds) {
+        await update(ref(database, `rooms/${roomCode}/players/${pId}`), {
+          hasRevealed: false,
+          isImpostor: false,
+          vote: "",
+        });
+      }
+    }
+  }, [room, playerId, roomCode, hasRejected]);
   const startVotingPhase = useCallback(async () => {
     console.log("startVotingPhase ejecutado");
     // 1. Resetear votos de TODOS los jugadores
@@ -121,10 +205,12 @@ export default function GamePlay() {
     // En web, usar window.confirm directamente
     if (Platform.OS === "web") {
       console.log("Ejecutando en web");
-      const confirmEnd = window.confirm("¿Terminar el juego? Esto cerrará la partida para todos");
+      const confirmEnd = window.confirm(
+        "¿Terminar el juego? Esto cerrará la partida para todos",
+      );
       console.log("Confirmación:", confirmEnd);
       if (!confirmEnd) return;
-      
+
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
@@ -169,10 +255,12 @@ export default function GamePlay() {
     // En web, usar window.confirm directamente
     if (Platform.OS === "web") {
       console.log("Ejecutando skip en web");
-      const confirmSkip = window.confirm("¿Quieres pasar directamente a la votación?");
+      const confirmSkip = window.confirm(
+        "¿Quieres pasar directamente a la votación?",
+      );
       console.log("Confirmación skip:", confirmSkip);
       if (!confirmSkip) return;
-      
+
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
@@ -181,21 +269,25 @@ export default function GamePlay() {
       console.log("startVotingPhase completado");
     } else {
       // En móvil, usar Alert
-      Alert.alert("Saltar discusión", "¿Quieres pasar directamente a la votación?", [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Sí, saltar",
-          style: "destructive",
-          onPress: async () => {
-            if (timerRef.current) {
-              clearInterval(timerRef.current);
-            }
-            console.log("Ejecutando startVotingPhase desde skip (móvil)");
-            await startVotingPhase();
-            console.log("startVotingPhase completado (móvil)");
+      Alert.alert(
+        "Saltar discusión",
+        "¿Quieres pasar directamente a la votación?",
+        [
+          { text: "Cancelar", style: "cancel" },
+          {
+            text: "Sí, saltar",
+            style: "destructive",
+            onPress: async () => {
+              if (timerRef.current) {
+                clearInterval(timerRef.current);
+              }
+              console.log("Ejecutando startVotingPhase desde skip (móvil)");
+              await startVotingPhase();
+              console.log("startVotingPhase completado (móvil)");
+            },
           },
-        },
-      ]);
+        ],
+      );
     }
   }, [startVotingPhase]);
 
@@ -216,8 +308,20 @@ export default function GamePlay() {
   const isHost = room.hostId === playerId;
   const isPlaying = room.gameState.phase === "playing";
 
-  console.log("GamePlay - isHost:", isHost, "hostId:", room.hostId, "playerId:", playerId);
-  console.log("GamePlay - phase:", room.gameState.phase, "isPlaying:", isPlaying);
+  console.log(
+    "GamePlay - isHost:",
+    isHost,
+    "hostId:",
+    room.hostId,
+    "playerId:",
+    playerId,
+  );
+  console.log(
+    "GamePlay - phase:",
+    room.gameState.phase,
+    "isPlaying:",
+    isPlaying,
+  );
 
   return (
     <View style={styles.container}>
@@ -255,6 +359,21 @@ export default function GamePlay() {
               <Text style={styles.skipButtonText}>SALTAR A VOTACIÓN</Text>
             </TouchableOpacity>
           )}
+
+          {isPlaying && !hasRejected && (
+            <TouchableOpacity
+              style={styles.rejectButton}
+              onPress={handleRejectWord}
+            >
+              <Text style={styles.rejectButtonText}>
+                ❌ No me gustó la palabra
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {hasRejected && (
+            <Text style={styles.rejectedText}>✓ Rechazaste la palabra</Text>
+          )}
         </View>
 
         <View style={styles.playersContainer}>
@@ -283,6 +402,26 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     letterSpacing: 1,
     fontSize: 14,
+  },
+  rejectButton: {
+    marginTop: 15,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: "#ffa500",
+    borderRadius: 12,
+  },
+  rejectButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+    letterSpacing: 1,
+    fontSize: 13,
+  },
+  rejectedText: {
+    marginTop: 15,
+    color: "#00ff88",
+    fontWeight: "bold",
+    fontSize: 13,
+    letterSpacing: 1,
   },
   container: {
     flex: 1,

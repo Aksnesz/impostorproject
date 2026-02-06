@@ -2,15 +2,15 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { onValue, ref, remove, update } from "firebase/database";
 import { useEffect, useState } from "react";
 import {
-    Alert,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    useWindowDimensions,
-    View,
+  Alert,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
 } from "react-native";
 import { database } from "../config/firebase";
 import { Room } from "../types/game";
@@ -167,7 +167,7 @@ export default function RoomScreen() {
       // El host cierra la sala para todos
       if (Platform.OS === "web") {
         const confirmed = window.confirm(
-          "Eres el host. Si sales, se cerrará la sala para todos. ¿Estás seguro?"
+          "Eres el host. Si sales, se cerrará la sala para todos. ¿Estás seguro?",
         );
         if (confirmed) {
           await remove(ref(database, `rooms/${roomCode}`));
@@ -225,6 +225,8 @@ export default function RoomScreen() {
       "gameState/currentClue": randomClue,
       "gameState/impostorIds": impostorIds,
       "gameState/timeLeft": 420,
+      "gameState/wordRejections": {},
+      "gameState/rejectionCount": 0,
     });
 
     // Marcar quién es impostor en cada jugador

@@ -1,14 +1,14 @@
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    useWindowDimensions,
-    View,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
 } from "react-native";
 
 export default function GameSetup() {
@@ -40,7 +40,6 @@ export default function GameSetup() {
     titleFontSize: isSmallScreen ? 16 : isMediumScreen ? 18 : 20,
     inputFontSize: isSmallScreen ? 14 : 16,
     addButtonSize: isSmallScreen ? 40 : 50,
-    categoryMinWidth: isSmallScreen ? "48%" : "45%",
   };
 
   const addPlayer = () => {
@@ -211,7 +210,6 @@ export default function GameSetup() {
               key={index}
               style={[
                 styles.categoryOption,
-                { minWidth: dynamicStyles.categoryMinWidth },
                 selectedCategories.includes(category) &&
                   styles.categoryOptionActive,
               ]}
@@ -290,9 +288,7 @@ export default function GameSetup() {
             { fontSize: isSmallScreen ? 14 : isMediumScreen ? 16 : 18 },
           ]}
         >
-          {canContinue
-            ? "CONTINUAR"
-            : `CONTINUAR`}
+          {canContinue ? "CONTINUAR" : `CONTINUAR`}
         </Text>
       </TouchableOpacity>
 

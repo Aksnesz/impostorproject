@@ -24,6 +24,8 @@ export interface Room {
     impostorIds: string[];
     votingResults?: { [playerId: string]: number };
     mostVoted?: string;
+    wordRejections?: { [playerId: string]: boolean }; // Track who rejected
+    rejectionCount?: number; // Total rejections for current word
   };
   createdAt: number;
 }
